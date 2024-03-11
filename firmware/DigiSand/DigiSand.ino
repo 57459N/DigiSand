@@ -2,7 +2,7 @@
 
 #include "print3x5.h"
 
-#define PART_AMOUNT 55
+#define PART_AMOUNT 60
 #define BTN1_PIN 2
 #define BTN2_PIN 3
 #define CS_PIN 6
@@ -50,7 +50,26 @@ void onSandPush() {
 }
 
 // функция вызывается, когда песок закончился
+bool isEmptyAction = false;
 void onSandEmpty() {
+  if (!isEmptyAction)
+    return;
+    
+  for (int i = 0; i < 5; ++i){
+    mtrx.setBright(15);
+    delay(200);
+    mtrx.setBright(0);
+    delay(200);
+  }
+  mtrx.setBright(data.bri);
+  delay(1000);
+  for (int i = 5; i > 0; --i){
+    mtrx.clear();
+    printDig(&mtrx, 2, 1, i);
+    mtrx.update();
+    delay(1000);
+  }  
+  resetSand();
 }
 
 // =====================================
@@ -129,7 +148,8 @@ void buttons() {
     dbl.tick(up, down);
 
     if (dbl.click()) resetSand();
-
+    if (dbl.hold()) isEmptyAction = !isEmptyAction;
+    
     if (up.click()) changeTime(1);
     if (up.step(0)) changeTime(10);
     if (up.step(1)) changeBri(1);
