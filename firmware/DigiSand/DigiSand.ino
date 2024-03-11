@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <time.h>
 
 #include "print3x5.h"
 
@@ -15,6 +16,11 @@ struct Data {
     int8_t bri = 5;
 };
 Data data;
+
+#define STATE_FALL 0
+#define STATE_STOPWATCH 1
+
+uint8_t State = STATE_FALL;
 
 #include <EEManager.h>
 EEManager memory(data);
@@ -42,7 +48,14 @@ Sand<BOX_W, BOX_H> box;
 
 // timer
 #include "Timer.h"
-Timer fall_tmr, disp_tmr;
+Timer general_tmr, disp_tmr;
+
+struct Times {
+  uint16_t fall = data.sec * 1000ul / PART_AMOUNT;
+  uint16_t stopwatch = 10;
+};
+
+Times times;
 
 // ============== ВАШ КОД ==============
 // функция вызывается при каждом "проталкивании" песчинки
@@ -114,7 +127,7 @@ void setup() {
     box.attachSet(setXY);
 
     resetSand();
-    fall_tmr.setInterval(data.sec * 1000ul / PART_AMOUNT);
+    general_tmr.setInterval(times.fall);
 }
 
 void changeTime(int8_t dir) {
@@ -130,10 +143,15 @@ void changeTime(int8_t dir) {
     printDig(&mtrx, 8 + 0, 1, sec / 10);
     printDig(&mtrx, 8 + 4, 1, sec % 10);
 
-    fall_tmr.setInterval(data.sec * 1000ul / PART_AMOUNT);
+    times.fall = data.sec * 1000ul / PART_AMOUNT;
+    if (State == STATE_FALL){
+      general_tmr.setInterval(times.fall);
+    }
     memory.update();
     mtrx.update();
 }
+
+
 
 void changeBri(int8_t dir) {
     data.bri += dir;
@@ -142,13 +160,43 @@ void changeBri(int8_t dir) {
     memory.update();
 }
 
+bool isFirstTime = true;
+bool isTimerPaused = false;
+
 void buttons() {
     up.tick();
     down.tick();
     dbl.tick(up, down);
 
-    if (dbl.click()) resetSand();
+    if (dbl.click()) {
+      if (State == STATE_STOPWATCH){
+        if (isTimerPaused)
+          isFirstTime = true;
+        else
+          isTimerPaused = true;
+      }       
+      else{
+        if (State == STATE_FALL){
+          resetSand();
+          isTimerPaused = false;
+        }  
+      }
+    }
+    
     if (dbl.hold()) isEmptyAction = !isEmptyAction;
+    
+    if (dbl.hold(1)){
+      State = STATE_FALL;
+      general_tmr.setInterval(times.fall);
+      Serial.print("State: ");
+      Serial.println(State);
+    }
+    if (dbl.hold(2)){
+      State = STATE_STOPWATCH;
+      general_tmr.setInterval(times.stopwatch);
+      Serial.print("State: ");
+      Serial.println(State);
+    }
     
     if (up.click()) changeTime(1);
     if (up.step(0)) changeTime(10);
@@ -170,7 +218,7 @@ void step() {
 }
 
 void fall() {
-    if (fall_tmr) {
+    if (general_tmr) {
         bool pushed = 0;
         if (mpu.getDir() > 0) {
             if (box.buf.get(7, 7) && !box.buf.get(8, 8)) {
@@ -203,13 +251,58 @@ void fall() {
     }
 }
 
+time_t startTime = 0;
+
+
+void stopwatch(){
+  if (general_tmr){
+    if (isFirstTime){
+      isTimerPaused = false;
+      isFirstTime = false;
+      startTime = millis();
+    }
+
+    if (isTimerPaused)
+      return;
+    
+    mtrx.clear();
+
+    time_t t = millis() - startTime;
+    uint8_t min = t / 60000;
+    uint8_t sec = t / 1000 % 60;
+    uint8_t tens_sec = t / 100 % 10;
+    if (min > 0){
+      general_tmr.setInterval(1000);
+      printDig(&mtrx, 0, 1, min / 10);
+      printDig(&mtrx, 4, 1, min % 10);
+      printDig(&mtrx, 8 + 0, 1, sec / 10);
+      printDig(&mtrx, 8 + 4, 1, sec % 10);
+    } else{
+      general_tmr.setInterval(100);
+      printDig(&mtrx, 0, 1, sec / 10);
+      printDig(&mtrx, 4, 1, sec % 10);
+      printDig(&mtrx, 8+3, 1, tens_sec);
+      
+    }
+    
+    mtrx.update();
+  }
+}
+
 void loop() {
     memory.tick();
     disp_tmr.tick();
     buttons();
 
     if (!disp_tmr.state()) {
-        step();
-        fall();
+        if (State == STATE_STOPWATCH){
+          stopwatch();
+        } else {
+          isFirstTime = true;
+          if (State == STATE_FALL){
+            step();
+            fall();
+          }
+        }
     }
 }
